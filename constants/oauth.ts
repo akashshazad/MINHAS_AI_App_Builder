@@ -1,6 +1,8 @@
 
 import * as Linking from "expo-linking";
 import * as ReactNative from "react-native";
+import * as Crypto from "expo-crypto";
+import * as SecureStore from "expo-secure-store";
 
 // Extract scheme from bundle ID (last segment timestamp, prefixed with "manus")
 // e.g., "space.manus.my.app.t20240115103045" -> "manus20240115103045"
@@ -24,6 +26,7 @@ export const APP_ID = env.appId;
 export const OWNER_OPEN_ID = env.ownerId;
 export const OWNER_NAME = env.ownerName;
 export const API_BASE_URL = env.apiBaseUrl;
+export const isManusOAuthConfigured = Boolean(OAUTH_PORTAL_URL && APP_ID);
 
 /**
  * Get the API base URL, deriving from current hostname if not set.
@@ -53,6 +56,8 @@ export function getApiBaseUrl(): string {
 
 export const SESSION_TOKEN_KEY = "app_session_token";
 export const USER_INFO_KEY = "manus-runtime-user-info";
+export const OAUTH_STATE_KEY = "manus-oauth-state";
+export const OAUTH_VERIFIER_KEY = "manus-oauth-code-verifier";
 
 const encodeState = (value: string) => {
   if (typeof globalThis.btoa === "function") {
@@ -80,14 +85,39 @@ export const getRedirectUri = () => {
   }
 };
 
-export const getLoginUrl = () => {
+function toBase64Url(bytes: Uint8Array) {
+  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function createPkceTransaction() {
+  const random = await Crypto.getRandomBytesAsync(32);
+  const state = toBase64Url(random);
+  const verifier = toBase64Url(await Crypto.getRandomBytesAsync(32));
+  const digest = await Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    verifier,
+    { encoding: Crypto.CryptoEncoding.BASE64 },
+  );
+  const challenge = digest.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  if (ReactNative.Platform.OS !== "web") {
+    await SecureStore.setItemAsync(OAUTH_STATE_KEY, state);
+    await SecureStore.setItemAsync(OAUTH_VERIFIER_KEY, verifier);
+  }
+  return { state, challenge };
+}
+
+export const getLoginUrl = async () => {
   const redirectUri = getRedirectUri();
-  const state = encodeState(redirectUri);
+  const { state, challenge } = await createPkceTransaction();
 
   const url = new URL(`${OAUTH_PORTAL_URL}/app-auth`);
   url.searchParams.set("appId", APP_ID);
   url.searchParams.set("redirectUri", redirectUri);
   url.searchParams.set("state", state);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("code_challenge", challenge);
+  url.searchParams.set("code_challenge_method", "S256");
   url.searchParams.set("type", "signIn");
 
   return url.toString();
@@ -104,10 +134,10 @@ export const getLoginUrl = () => {
  * @returns Always null, the callback is handled via deep link.
  */
 export async function startOAuthLogin(): Promise<string | null> {
-  if (!OAUTH_PORTAL_URL || !APP_ID) {
+  if (!isManusOAuthConfigured) {
     throw new Error("Login is not configured: OAuth portal or app ID is missing.");
   }
-  const loginUrl = getLoginUrl();
+  const loginUrl = await getLoginUrl();
 
   if (ReactNative.Platform.OS === "web") {
     // On web, just redirect
@@ -127,5 +157,3 @@ export async function startOAuthLogin(): Promise<string | null> {
   // The OAuth callback will reopen the app via deep link.
   return null;
 }
-
-

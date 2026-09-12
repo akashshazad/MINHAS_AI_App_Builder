@@ -6,7 +6,6 @@ import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useColors } from "@/hooks/use-colors";
 import { useAuth } from "@/hooks/use-auth";
-import { startOAuthLogin } from "@/constants/oauth";
 import { trpc } from "@/lib/trpc";
 
 const features = [
@@ -23,7 +22,6 @@ export default function HomeScreen() {
   const colors = useColors();
   const { isAuthenticated, loading: authLoading } = useAuth();
   const [idea, setIdea] = useState("");
-  const [loginError, setLoginError] = useState<string | null>(null);
   const createPlan = trpc.projects.createPlan.useMutation({
     onSuccess: ({ projectId }) => router.push({ pathname: "/project/[id]", params: { id: String(projectId) } }),
   });
@@ -33,15 +31,6 @@ export default function HomeScreen() {
   const chooseFeature = () => setIdea("Build a mobile app: ");
 
   const submit = async () => {
-    if (!isAuthenticated) {
-      try {
-        setLoginError(null);
-        await startOAuthLogin();
-      } catch (error) {
-        setLoginError(error instanceof Error ? error.message : "Unable to start login.");
-      }
-      return;
-    }
     if (idea.trim().length < 8) {
       Alert.alert("Add an idea", "Describe what you want MINHAS AI to build.");
       return;
@@ -120,7 +109,6 @@ export default function HomeScreen() {
               </View>
             </View>
             {createPlan.error ? <Text className="mt-3 text-sm text-error">{createPlan.error.message}</Text> : null}
-            {loginError ? <Text className="mt-3 text-sm text-error">{loginError}</Text> : null}
 
             <Text className="mt-7 text-xs font-semibold tracking-[1.5px] text-muted">START FROM A TEMPLATE</Text>
             <FlatList
@@ -152,7 +140,7 @@ export default function HomeScreen() {
               <Text className="text-xl font-bold text-foreground">Recent projects</Text>
               <Pressable onPress={() => router.push("/(tabs)/projects")}><Text className="font-semibold text-primary">View all</Text></Pressable>
             </View>
-            {!isAuthenticated ? <Text className="mt-3 text-sm leading-5 text-muted">Sign in to persist your work across devices.</Text> : null}
+            <Text className="mt-3 text-sm leading-5 text-muted">MINHAS workspace authentication is active. Manus account connection remains optional.</Text>
           </View>
         }
         renderItem={({ item }) => (
@@ -183,5 +171,3 @@ const styles = StyleSheet.create({
   example: { minHeight: 58, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.7)", borderWidth: 1, borderColor: "#E4E7EC", paddingHorizontal: 15, paddingVertical: 11, flexDirection: "row", alignItems: "center" },
   projectCard: { marginTop: 10, minHeight: 70, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.76)", borderWidth: 1, borderColor: "#E4E7EC", paddingHorizontal: 14, flexDirection: "row", alignItems: "center" },
 });
-
-

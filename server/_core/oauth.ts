@@ -4,6 +4,7 @@ import type { Express, Request, Response } from "express";
 import { getUserByOpenId, upsertUser } from "../db";
 import { getSessionCookieOptions } from "./cookies";
 import { getAllowedOAuthRedirectUris, sdk } from "./sdk";
+import { randomUUID } from "node:crypto";
 
 function getQueryParam(req: Request, key: string): string | undefined {
   const value = req.query[key];
@@ -80,6 +81,25 @@ function buildUserResponse(
 }
 
 export function registerOAuthRoutes(app: Express) {
+  app.post("/api/auth/anonymous", async (req: Request, res: Response) => {
+    const requestId = String(res.locals.requestId ?? req.headers["x-request-id"] ?? "anonymous-auth");
+    try {
+      if (!process.env.JWT_SECRET) {
+        res.status(503).json({ error: "MINHAS session signing is unavailable", requestId });
+        return;
+      }
+      const openId = `minhas_guest_${randomUUID()}`;
+      const user = await syncUser({ openId, name: "Guest workspace", loginMethod: "anonymous" });
+      const sessionToken = await sdk.createSessionToken(openId, { name: "Guest workspace", expiresInMs: ONE_YEAR_MS });
+      const cookieOptions = getSessionCookieOptions(req);
+      res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+      res.status(201).json({ app_session_id: sessionToken, user: buildUserResponse(user), authMode: "anonymous" });
+    } catch (error) {
+      console.error("[Auth] Anonymous session failed", { requestId, error: error instanceof Error ? error.message : "unknown" });
+      res.status(503).json({ error: "MINHAS anonymous session unavailable", requestId });
+    }
+  });
+
   app.get("/api/oauth/callback", async (req: Request, res: Response) => {
     const code = getQueryParam(req, "code");
     const state = getQueryParam(req, "state");
@@ -114,14 +134,17 @@ export function registerOAuthRoutes(app: Express) {
   app.get("/api/oauth/mobile", async (req: Request, res: Response) => {
     const code = getQueryParam(req, "code");
     const state = getQueryParam(req, "state");
+    const codeVerifier = getQueryParam(req, "code_verifier");
+    const redirectUri = getQueryParam(req, "redirect_uri");
+    const requestId = String(req.headers["x-request-id"] ?? "oauth-mobile");
 
-    if (!code || !state) {
-      res.status(400).json({ error: "code and state are required" });
+    if (!code || !state || !codeVerifier || !redirectUri) {
+      res.status(400).json({ error: "code, state, code_verifier, and redirect_uri are required", requestId });
       return;
     }
 
     try {
-      const tokenResponse = await sdk.exchangeCodeForToken(code, state);
+      const tokenResponse = await sdk.exchangeCodeForToken(code, state, codeVerifier, redirectUri);
       const userInfo = await sdk.getUserInfo(tokenResponse.accessToken);
       const user = await syncUser(userInfo);
 
@@ -138,8 +161,8 @@ export function registerOAuthRoutes(app: Express) {
         user: buildUserResponse(user),
       });
     } catch (error) {
-      console.error("[OAuth] Mobile exchange failed", error);
-      res.status(500).json({ error: "OAuth mobile exchange failed" });
+      console.error("[OAuth] Mobile exchange failed", { requestId, error: error instanceof Error ? error.message : "unknown" });
+      res.status(502).json({ error: "OAuth mobile exchange failed", requestId });
     }
   });
 
@@ -187,5 +210,3 @@ export function registerOAuthRoutes(app: Express) {
     }
   });
 }
-
-

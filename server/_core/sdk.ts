@@ -59,16 +59,23 @@ class OAuthService {
     return redirectUri;
   }
 
-  async getTokenByCode(code: string, state: string): Promise<ExchangeTokenResponse> {
+  async getTokenByCode(code: string, state: string, codeVerifier?: string, redirectUri?: string): Promise<ExchangeTokenResponse> {
+    const resolvedRedirectUri = redirectUri?.trim().replace(/\/$/, "") || this.decodeState(state);
+    if (!getAllowedOAuthRedirectUris().includes(resolvedRedirectUri)) {
+      throw new Error("OAuth redirect URI is not in the exact server allowlist.");
+    }
     const payload: ExchangeTokenRequest = {
       clientId: ENV.appId,
       grantType: "authorization_code",
       code,
-      redirectUri: this.decodeState(state),
+      redirectUri: resolvedRedirectUri,
+      ...(codeVerifier ? { codeVerifier } : {}),
     };
 
     const { data } = await this.client.post<ExchangeTokenResponse>(EXCHANGE_TOKEN_PATH, payload);
-
+    if (!isNonEmptyString(data?.accessToken) || !isNonEmptyString(data?.tokenType) || !Number.isFinite(data?.expiresIn)) {
+      throw new Error("OAuth token response is invalid.");
+    }
     return data;
   }
 
@@ -118,8 +125,8 @@ class SDKServer {
    * @example
    * const tokenResponse = await sdk.exchangeCodeForToken(code, state);
    */
-  async exchangeCodeForToken(code: string, state: string): Promise<ExchangeTokenResponse> {
-    return this.oauthService.getTokenByCode(code, state);
+  async exchangeCodeForToken(code: string, state: string, codeVerifier?: string, redirectUri?: string): Promise<ExchangeTokenResponse> {
+    return this.oauthService.getTokenByCode(code, state, codeVerifier, redirectUri);
   }
 
   /**
@@ -333,5 +340,3 @@ function buildCronUser(userInfo: GetUserInfoWithJwtResponse): AuthenticatedUser 
 }
 
 export const sdk = new SDKServer();
-
-

@@ -1,27 +1,70 @@
-
-import { invokeLLM, listLLMModels } from "./_core/llm";
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import { invokeLLM, listLLMModels, type InvokeResult, type ResponseFormat } from "./_core/llm";
 import type { GeneratedFile, ProjectPlan, ProjectType, SourceLanguage } from "../shared/types";
+
+const stringArray = z.array(z.string().trim().min(1)).max(128);
+export const projectPlanResponseSchema = z.object({
+  schemaVersion: z.literal("1.0"),
+  action: z.literal("create_project"),
+  project: z.object({
+    projectName: z.string().trim().min(1).max(160),
+    type: z.literal("mobile_app"),
+    framework: z.literal("Expo + React Native + TypeScript"),
+    summary: z.string().trim().min(1).max(1000),
+    requirements: stringArray,
+    pages: stringArray,
+    components: stringArray,
+    database: stringArray,
+    apis: stringArray,
+    authenticationRequired: z.boolean(),
+    businessRules: stringArray,
+    testingStrategy: stringArray,
+    implementationNotes: stringArray,
+  }),
+}).strict();
+
+const generatedFileSchema = z.object({
+  path: z.string().trim().min(1).max(320),
+  language: z.string().trim().min(1).max(40),
+  content: z.string().max(200000),
+  isCritical: z.boolean(),
+}).strict();
+export const generatedFilesResponseSchema = z.object({
+  schemaVersion: z.literal("1.0"),
+  action: z.literal("generate_files"),
+  files: z.array(generatedFileSchema).max(24),
+}).strict();
+
+type StructuredFailure = { requestId: string; message: string };
 
 function textFromMessage(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
-    return content
-      .map((item) => (typeof item === "string" ? item : typeof item === "object" && item && "text" in item ? String((item as any).text) : ""))
-      .join("\n");
+    return content.map((item) => typeof item === "string" ? item : typeof item === "object" && item && "text" in item ? String((item as { text?: unknown }).text ?? "") : "").join("\n");
   }
   return "";
 }
 
-function parseJson<T>(value: string): T {
-  const trimmed = value.trim();
-  try {
-    return JSON.parse(trimmed) as T;
-  } catch {
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-    if (start >= 0 && end > start) return JSON.parse(trimmed.slice(start, end + 1)) as T;
-    throw new Error("AI returned invalid JSON");
-  }
+export function extractJsonCandidate(value: string): string {
+  const withoutFence = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  const start = withoutFence.indexOf("{");
+  const end = withoutFence.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("No complete structured object found");
+  return withoutFence.slice(start, end + 1);
+}
+
+export function parseStructured<T>(value: string, schema: z.ZodType<T>): T {
+  const candidate = extractJsonCandidate(value);
+  return schema.parse(JSON.parse(candidate));
+}
+
+function structuredResponse(format: ResponseFormat): ResponseFormat { return format; }
+
+function modelThinking(model: string | undefined) {
+  if (model?.startsWith("claude-")) return { thinking: { type: "enabled" as const, budget_tokens: 1024 } };
+  if (model?.startsWith("gpt-")) return { reasoning: { effort: "low" as const } };
+  return {};
 }
 
 async function pickModel(preferred: string) {
@@ -33,29 +76,37 @@ async function pickModel(preferred: string) {
   }
 }
 
-function modelThinking(model: string | undefined) {
-  if (model?.startsWith("claude-")) return { thinking: { type: "enabled" as const, budget_tokens: 1024 } };
-  if (model?.startsWith("gpt-")) return { reasoning: { effort: "low" as const } };
-  return {};
+function responseText(response: InvokeResult) {
+  return textFromMessage(response.choices?.[0]?.message?.content);
 }
 
-function normalizePlan(raw: Partial<ProjectPlan>, idea: string, type: ProjectType): ProjectPlan {
-  const array = (value: unknown, fallback: string[]) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : fallback;
-  return {
-    projectName: String(raw.projectName || "MINHAS AI Project").slice(0, 160),
-    type: "mobile_app",
-    framework: "Expo + React Native + TypeScript",
-    summary: String(raw.summary || idea).slice(0, 1000),
-    requirements: array(raw.requirements, [idea]),
-    pages: array(raw.pages, ["Home"]),
-    components: array(raw.components, ["App shell"]),
-    database: array(raw.database, []),
-    apis: array(raw.apis, []),
-    authenticationRequired: Boolean(raw.authenticationRequired),
-    businessRules: array(raw.businessRules, []),
-    testingStrategy: array(raw.testingStrategy, ["Run typecheck and production build before deployment"]),
-    implementationNotes: array(raw.implementationNotes, ["Review the generated workspace before deploying"]),
-  };
+async function invokeWithRecovery<T>(options: {
+  schema: z.ZodType<T>;
+  format: ResponseFormat;
+  initial: () => Promise<InvokeResult>;
+  repair: (invalid: string) => Promise<InvokeResult>;
+  retry: () => Promise<InvokeResult>;
+}): Promise<T> {
+  const requestId = randomUUID();
+  let invalid = "";
+  let first = "";
+  try {
+    first = responseText(await options.initial());
+    return parseStructured(first, options.schema);
+  } catch {
+    try {
+      invalid = first;
+      const repaired = responseText(await options.repair(invalid.slice(0, 12000)));
+      return parseStructured(repaired, options.schema);
+    } catch {
+      try {
+        return parseStructured(responseText(await options.retry()), options.schema);
+      } catch {
+        const failure: StructuredFailure = { requestId, message: "AI structured output failed validation." };
+        throw new Error(`${failure.message} Request ID: ${failure.requestId}`);
+      }
+    }
+  }
 }
 
 export function detectSourceLanguage(idea: string): SourceLanguage {
@@ -64,45 +115,66 @@ export function detectSourceLanguage(idea: string): SourceLanguage {
   return "english";
 }
 
+const planFormat = structuredResponse({
+  type: "json_schema",
+  json_schema: {
+    name: "minhas_project_plan_v1",
+    strict: true,
+    schema: {
+      type: "object", additionalProperties: false,
+      required: ["schemaVersion", "action", "project"],
+      properties: {
+        schemaVersion: { type: "string", enum: ["1.0"] },
+        action: { type: "string", enum: ["create_project"] },
+        project: { type: "object", additionalProperties: false, required: ["projectName", "type", "framework", "summary", "requirements", "pages", "components", "database", "apis", "authenticationRequired", "businessRules", "testingStrategy", "implementationNotes"], properties: {
+          projectName: { type: "string" }, type: { type: "string", enum: ["mobile_app"] }, framework: { type: "string", enum: ["Expo + React Native + TypeScript"] }, summary: { type: "string" },
+          requirements: { type: "array", items: { type: "string" } }, pages: { type: "array", items: { type: "string" } }, components: { type: "array", items: { type: "string" } }, database: { type: "array", items: { type: "string" } }, apis: { type: "array", items: { type: "string" } }, authenticationRequired: { type: "boolean" }, businessRules: { type: "array", items: { type: "string" } }, testingStrategy: { type: "array", items: { type: "string" } }, implementationNotes: { type: "array", items: { type: "string" } },
+        } },
+      },
+    },
+  },
+});
+
+const filesFormat = structuredResponse({
+  type: "json_schema", json_schema: { name: "minhas_generated_files_v1", strict: true, schema: {
+    type: "object", additionalProperties: false, required: ["schemaVersion", "action", "files"], properties: {
+      schemaVersion: { type: "string", enum: ["1.0"] }, action: { type: "string", enum: ["generate_files"] }, files: { type: "array", maxItems: 24, items: { type: "object", additionalProperties: false, required: ["path", "language", "content", "isCritical"], properties: { path: { type: "string" }, language: { type: "string" }, content: { type: "string" }, isCritical: { type: "boolean" } } } },
+    },
+  } },
+});
+
+function normalizePlan(raw: z.infer<typeof projectPlanResponseSchema>["project"], idea: string, type: ProjectType): ProjectPlan {
+  return { ...raw, type: type === "mobile_app" ? "mobile_app" : "mobile_app", summary: raw.summary || idea };
+}
+
 export async function generatePlan(idea: string, type: ProjectType): Promise<ProjectPlan> {
   const model = await pickModel("gpt-5-mini");
-  const response = await invokeLLM({
-    model,
-    messages: [
-      {
-        role: "system",
-        content: "You are the MINHAS AI mobile-app planning agent. The only supported target is a real mobile application using Expo + React Native + TypeScript for Android/iOS. Return JSON only with projectName, type, framework, summary, requirements, pages, components, database, apis, authenticationRequired, businessRules, testingStrategy, and implementationNotes. Force type=mobile_app and framework=Expo + React Native + TypeScript. Do not plan websites, PWAs, desktop apps, slides, games, image generation, or research products. Never claim code, deployment, payments, realtime, or integrations already exist unless actually available; keep the plan actionable and implementation-ready.",
-      },
-      { role: "user", content: `Target project type: mobile_app\nFramework: Expo + React Native + TypeScript\nUser idea:\n${idea}` },
-    ],
-    response_format: { type: "json_object" },
-    ...modelThinking(model),
+  const baseMessages = [
+    { role: "system" as const, content: "You are the MINHAS AI mobile-app planning agent. Convert the user's natural-language request in Urdu, Roman Urdu, English, or mixed language into the exact versioned structured project plan. Never output markdown, code fences, unknown fields, or claims that are not supported. Include concrete requirements for every requested feature." },
+    { role: "user" as const, content: `Target project type: mobile_app\nFramework: Expo + React Native + TypeScript\nUser idea:\n${idea}` },
+  ];
+  const result = await invokeWithRecovery({
+    schema: projectPlanResponseSchema,
+    format: planFormat,
+    initial: () => invokeLLM({ model, messages: baseMessages, response_format: planFormat, ...modelThinking(model) }),
+    repair: (invalid) => invokeLLM({ model, messages: [{ role: "system", content: `Repair this failed output into the exact required structured project plan. Return only the schema-valid object. Failed output:\n${invalid}` }, ...baseMessages], response_format: planFormat, ...modelThinking(model) }),
+    retry: () => invokeLLM({ model, messages: [...baseMessages, { role: "user", content: "Retry strictly. Return only the required schema-valid object; no markdown or prose." }], response_format: planFormat, ...modelThinking(model) }),
   });
-  const content = textFromMessage(response.choices?.[0]?.message?.content);
-  return normalizePlan(parseJson<Partial<ProjectPlan>>(content), idea, type);
+  return normalizePlan(result.project, idea, type);
 }
 
 export async function generateStarterFiles(plan: ProjectPlan): Promise<GeneratedFile[]> {
   const model = await pickModel("claude-sonnet-4-6");
-  const response = await invokeLLM({
-    model,
-    messages: [
-      {
-        role: "system",
-        content: "You are the MINHAS AI coding agent. Generate a coherent starter workspace for an Expo + React Native + TypeScript mobile app. Return JSON only in the form {\"files\":[{\"path\":\"...\",\"language\":\"...\",\"content\":\"...\",\"isCritical\":true|false}]}. The generated workspace MUST be compatible with Expo Router: include package.json, app.json or app.config.ts, app/_layout.tsx, app/index.tsx, README.md, and .env.example. Use real implementation code. Do not invent backend endpoints, secrets, payments, authentication, or external integrations. If the plan requires backend behavior, create an explicit typed client/service boundary and document the required environment variables without embedding secrets. Never create src/main.tsx or a second competing application entry point. Never include secrets. Keep output concise enough for the workspace viewer.",
-      },
-      { role: "user", content: JSON.stringify(plan) },
-    ],
-    response_format: { type: "json_object" },
-    ...modelThinking(model),
+  const baseMessages = [
+    { role: "system" as const, content: "You are the MINHAS AI coding agent. Generate real Expo + React Native + TypeScript starter files for the supplied plan. Return only the exact versioned structured response. Never include secrets, invented endpoints, markdown, or unknown fields." },
+    { role: "user" as const, content: JSON.stringify(plan) },
+  ];
+  const result = await invokeWithRecovery({
+    schema: generatedFilesResponseSchema,
+    format: filesFormat,
+    initial: () => invokeLLM({ model, messages: baseMessages, response_format: filesFormat, ...modelThinking(model) }),
+    repair: (invalid) => invokeLLM({ model, messages: [{ role: "system", content: `Repair the failed output into the exact required versioned files schema. Return only a schema-valid object. Failed output:\n${invalid}` }, ...baseMessages], response_format: filesFormat, ...modelThinking(model) }),
+    retry: () => invokeLLM({ model, messages: [...baseMessages, { role: "user", content: "Retry strictly with only the required schema-valid files object." }], response_format: filesFormat, ...modelThinking(model) }),
   });
-  const content = textFromMessage(response.choices?.[0]?.message?.content);
-  const raw = parseJson<{ files?: GeneratedFile[] }>(content);
-  const files = Array.isArray(raw.files) ? raw.files : [];
-  return files
-    .filter((file) => file && typeof file.path === "string" && typeof file.content === "string")
-    .slice(0, 24)
-    .map((file) => ({ path: file.path, language: typeof file.language === "string" ? file.language : "text", content: file.content, isCritical: Boolean(file.isCritical) }));
+  return result.files;
 }
-
-

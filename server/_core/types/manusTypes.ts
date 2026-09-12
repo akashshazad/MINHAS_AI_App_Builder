@@ -22,6 +22,7 @@ export interface ExchangeTokenRequest {
   clientId: string;
   clientSecret?: string;
   redirectUri: string;
+  codeVerifier?: string;
 }
 
 export interface ExchangeTokenResponse {
@@ -70,5 +71,4 @@ export interface GetUserInfoWithJwtResponse {
   /** Cron-only; references `schedule_task.uid`. */
   taskUid?: string | null;
 }
-
 

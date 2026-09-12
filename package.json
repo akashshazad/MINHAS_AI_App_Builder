@@ -1,4 +1,3 @@
-
 {
   "name": "minhas-ai-builder",
   "version": "4.8.0",
@@ -15,8 +14,8 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "db:push": "drizzle-kit generate && drizzle-kit migrate && node scripts/apply-custom-migrations.mjs",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "qr": "node scripts/generate_qr.mjs",
     "preflight": "node scripts/preflight.mjs",
     "production:preflight": "node scripts/production-preflight.mjs",
@@ -73,6 +72,7 @@
     "expo-audio": "~1.1.0",
     "expo-build-properties": "^1.0.10",
     "expo-constants": "~18.0.12",
+    "expo-crypto": "~15.0.9",
     "expo-font": "~14.0.10",
     "expo-haptics": "~15.0.8",
     "expo-image": "~3.0.11",
@@ -108,6 +108,7 @@
   },
   "devDependencies": {
     "@expo/ngrok": "^4.1.3",
+    "@playwright/test": "^1.55.0",
     "@types/cookie": "^0.6.0",
     "@types/express": "^4.17.25",
     "@types/node": "^22.19.3",
@@ -124,8 +125,7 @@
     "tailwindcss": "^3.4.17",
     "tsx": "^4.21.0",
     "typescript": "~5.9.3",
-    "vitest": "^2.1.9",
-    "@playwright/test": "^1.55.0"
+    "vitest": "^2.1.9"
   },
   "packageManager": "pnpm@9.12.0"
 }

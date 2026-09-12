@@ -3,6 +3,7 @@ import { ThemedView } from "@/components/themed-view";
 import * as Api from "@/lib/_core/api";
 import * as Auth from "@/lib/_core/auth";
 import { parseOAuthCallback } from "@/lib/auth/oauth-callback";
+import { getRedirectUri } from "@/constants/oauth";
 import * as Linking from "expo-linking";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
@@ -62,73 +63,23 @@ export default function OAuthCallback() {
           return;
         }
 
-        // Get URL from params or Linking
-        let url: string | null = null;
-
-        // Try to get from local search params first (works with expo-router)
-        if (params.code || params.state || params.error) {
-          console.log("[OAuth] Found params in route params");
-          // Extract from params
-          const urlParams = new URLSearchParams();
-          if (params.code) urlParams.set("code", params.code);
-          if (params.state) urlParams.set("state", params.state);
-          if (params.error) urlParams.set("error", params.error);
-          url = `?${urlParams.toString()}`;
-          console.log("[OAuth] Constructed URL from params:", url);
-        } else {
-          console.log("[OAuth] No params found, checking Linking.getInitialURL()...");
-          // Fallback: try to get from Linking
-          const initialUrl = await Linking.getInitialURL();
-          console.log("[OAuth] Linking.getInitialURL():", initialUrl);
-          if (initialUrl) {
-            url = initialUrl;
-          }
-        }
-
-        // Check for error
-        const error =
-          params.error || (url ? new URL(url, "http://dummy").searchParams.get("error") : null);
+        const initialUrl = await Linking.getInitialURL();
+        const callback = parseOAuthCallback(initialUrl ?? "", {
+          code: params.code,
+          state: params.state,
+          error: params.error,
+          sessionToken: params.sessionToken,
+        });
+        const error = callback.error;
         if (error) {
-          console.error("[OAuth] Error parameter found:", error);
           setStatus("error");
           setErrorMessage(error || "OAuth error occurred");
           return;
         }
 
-        // Check for code and state
-        let code: string | null = null;
-        let state: string | null = null;
-        let sessionToken: string | null = null;
-
-        // Try to get from params first
-        if (params.code && params.state) {
-          console.log("[OAuth] Using code and state from route params");
-          code = params.code;
-          state = params.state;
-        } else if (url) {
-          console.log("[OAuth] Parsing code and state from URL:", url);
-          // Parse from URL
-          try {
-            const urlObj = new URL(url);
-            code = urlObj.searchParams.get("code");
-            state = urlObj.searchParams.get("state");
-            sessionToken = urlObj.searchParams.get("sessionToken");
-            console.log("[OAuth] Extracted from URL:", {
-              code: code?.substring(0, 20) + "...",
-              state: state?.substring(0, 20) + "...",
-              sessionToken: sessionToken ? "present" : "missing",
-            });
-          } catch (e) {
-            console.error("[OAuth] Invalid callback URL.");
-            throw new Error("Invalid authentication callback URL.");
-          }
-        }
-
-        console.log("[OAuth] Final extracted values:", {
-          hasCode: !!code,
-          hasState: !!state,
-          hasSessionToken: !!sessionToken,
-        });
+        const code = callback.code;
+        const state = callback.state;
+        const sessionToken = callback.sessionToken;
 
         // If we have sessionToken directly from URL, use it
         if (sessionToken) {
@@ -156,7 +107,11 @@ export default function OAuthCallback() {
         }
 
         // Exchange code for session token
-        const result = await Api.exchangeOAuthCode(code, state);
+        const verifier = Platform.OS === "web" ? null : await Auth.consumeOAuthTransaction(state);
+        if (Platform.OS !== "web" && !verifier) {
+          throw new Error("OAuth state is invalid, expired, or already used.");
+        }
+        const result = await Api.exchangeOAuthCode(code, state, verifier ?? undefined, Platform.OS === "web" ? undefined : getRedirectUri());
         console.log("[OAuth] Exchange result:", {
           hasSessionToken: !!result.sessionToken,
           hasUser: !!result.user,
@@ -241,5 +196,4 @@ export default function OAuthCallback() {
     </SafeAreaView>
   );
 }
-
 

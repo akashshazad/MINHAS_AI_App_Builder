@@ -95,22 +95,17 @@ export async function apiCall<T>(endpoint: string, options: RequestInit = {}): P
 export async function exchangeOAuthCode(
   code: string,
   state: string,
+  codeVerifier?: string,
+  redirectUri?: string,
 ): Promise<{ sessionToken: string; user: any }> {
-  console.log("[API] exchangeOAuthCode called");
-  // Use GET with query params
   const params = new URLSearchParams({ code, state });
+  if (codeVerifier) params.set("code_verifier", codeVerifier);
+  if (redirectUri) params.set("redirect_uri", redirectUri);
   const endpoint = `/api/oauth/mobile?${params.toString()}`;
-  console.log("[API] Calling OAuth mobile endpoint:", endpoint);
   const result = await apiCall<{ app_session_id: string; user: any }>(endpoint);
 
   // Convert app_session_id to sessionToken for compatibility
   const sessionToken = result.app_session_id;
-  console.log("[API] OAuth exchange result:", {
-    hasSessionToken: !!sessionToken,
-    hasUser: !!result.user,
-    sessionToken: sessionToken ? `${sessionToken.substring(0, 50)}...` : null,
-  });
-
   return {
     sessionToken,
     user: result.user,
@@ -140,6 +135,20 @@ export async function getMe(): Promise<{
     console.error("[API] getMe failed:", error);
     return null;
   }
+}
+
+export async function createAnonymousSession(): Promise<{ sessionToken: string; user: any }> {
+  const baseUrl = getApiBaseUrl();
+  const cleanBaseUrl = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  const response = await fetch(`${cleanBaseUrl}/api/auth/anonymous`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+  });
+  const payload = await response.json() as { app_session_id?: string; user?: any; error?: string };
+  if (!response.ok || !payload.app_session_id) throw new Error(payload.error || "MINHAS workspace authentication is unavailable.");
+  if (Platform.OS !== "web") await Auth.setSessionToken(payload.app_session_id);
+  return { sessionToken: payload.app_session_id, user: payload.user };
 }
 
 export async function validateSession(): Promise<{
@@ -182,5 +191,3 @@ export async function establishSession(token: string): Promise<boolean> {
     return false;
   }
 }
-
-

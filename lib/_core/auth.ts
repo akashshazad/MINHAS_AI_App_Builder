@@ -1,7 +1,7 @@
 
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
-import { SESSION_TOKEN_KEY, USER_INFO_KEY } from "@/constants/oauth";
+import { OAUTH_STATE_KEY, OAUTH_VERIFIER_KEY, SESSION_TOKEN_KEY, USER_INFO_KEY } from "@/constants/oauth";
 
 export type User = {
   id: number;
@@ -126,4 +126,23 @@ export async function clearUserInfo(): Promise<void> {
   }
 }
 
+export async function setOAuthTransaction(state: string, verifier: string): Promise<void> {
+  if (Platform.OS === "web") return;
+  await SecureStore.setItemAsync(OAUTH_STATE_KEY, state);
+  await SecureStore.setItemAsync(OAUTH_VERIFIER_KEY, verifier);
+}
+
+export async function consumeOAuthTransaction(expectedState: string): Promise<string | null> {
+  if (Platform.OS === "web") return null;
+  const [storedState, verifier] = await Promise.all([
+    SecureStore.getItemAsync(OAUTH_STATE_KEY),
+    SecureStore.getItemAsync(OAUTH_VERIFIER_KEY),
+  ]);
+  await Promise.all([
+    SecureStore.deleteItemAsync(OAUTH_STATE_KEY),
+    SecureStore.deleteItemAsync(OAUTH_VERIFIER_KEY),
+  ]);
+  if (!storedState || storedState !== expectedState || !verifier) return null;
+  return verifier;
+}
 
