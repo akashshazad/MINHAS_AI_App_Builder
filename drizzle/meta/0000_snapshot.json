@@ -1,3 +1,4 @@
+
 {
   "version": "5",
   "dialect": "mysql",
@@ -104,3 +105,5 @@
     "indexes": {}
   }
 }
+
+

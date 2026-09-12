@@ -1,10 +1,12 @@
+
 import { ThemedView } from "@/components/themed-view";
 import * as Api from "@/lib/_core/api";
 import * as Auth from "@/lib/_core/auth";
+import { parseOAuthCallback } from "@/lib/auth/oauth-callback";
 import * as Linking from "expo-linking";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Text } from "react-native";
+import { ActivityIndicator, Platform, Text } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function OAuthCallback() {
@@ -22,18 +24,15 @@ export default function OAuthCallback() {
   useEffect(() => {
     const handleCallback = async () => {
       console.log("[OAuth] Callback handler triggered");
-      console.log("[OAuth] Params received:", {
-        code: params.code,
-        state: params.state,
-        error: params.error,
-        sessionToken: params.sessionToken ? "present" : "missing",
-        user: params.user ? "present" : "missing",
-      });
       try {
         // Check for sessionToken in params first (web OAuth callback from server redirect)
         if (params.sessionToken) {
           console.log("[OAuth] Session token found in params (web callback)");
           await Auth.setSessionToken(params.sessionToken);
+          if (Platform.OS !== "web" && !(await Api.validateSession())) {
+            await Auth.removeSessionToken();
+            throw new Error("The received session could not be validated.");
+          }
 
           // Decode and store user info if available
           if (params.user) {
@@ -53,17 +52,13 @@ export default function OAuthCallback() {
                 lastSignedIn: new Date(userData.lastSignedIn || Date.now()),
               };
               await Auth.setUserInfo(userInfo);
-              console.log("[OAuth] User info stored:", userInfo);
-            } catch (err) {
+                } catch (err) {
               console.error("[OAuth] Failed to parse user data:", err);
             }
           }
 
           setStatus("success");
-          console.log("[OAuth] Web authentication successful, redirecting to home...");
-          setTimeout(() => {
-            router.replace("/(tabs)");
-          }, 1000);
+          router.replace("/(tabs)");
           return;
         }
 
@@ -124,22 +119,8 @@ export default function OAuthCallback() {
               sessionToken: sessionToken ? "present" : "missing",
             });
           } catch (e) {
-            console.log("[OAuth] Failed to parse as full URL, trying regex:", e);
-            // Try parsing as relative URL with query params
-            const match = url.match(/[?&](code|state|sessionToken)=([^&]+)/g);
-            if (match) {
-              match.forEach((param) => {
-                const [key, value] = param.substring(1).split("=");
-                if (key === "code") code = decodeURIComponent(value);
-                if (key === "state") state = decodeURIComponent(value);
-                if (key === "sessionToken") sessionToken = decodeURIComponent(value);
-              });
-              console.log("[OAuth] Extracted from regex:", {
-                code: code?.substring(0, 20) + "...",
-                state: state?.substring(0, 20) + "...",
-                sessionToken: sessionToken ? "present" : "missing",
-              });
-            }
+            console.error("[OAuth] Invalid callback URL.");
+            throw new Error("Invalid authentication callback URL.");
           }
         }
 
@@ -151,16 +132,15 @@ export default function OAuthCallback() {
 
         // If we have sessionToken directly from URL, use it
         if (sessionToken) {
-          console.log("[OAuth] Session token found in URL, storing...");
           await Auth.setSessionToken(sessionToken);
-          console.log("[OAuth] Session token stored successfully");
+          if (Platform.OS !== "web" && !(await Api.validateSession())) {
+            await Auth.removeSessionToken();
+            throw new Error("The received session could not be validated.");
+          }
           // User info is already in the OAuth callback response
           // No need to fetch from API
           setStatus("success");
-          console.log("[OAuth] Redirecting to home...");
-          setTimeout(() => {
-            router.replace("/(tabs)");
-          }, 1000);
+          router.replace("/(tabs)");
           return;
         }
 
@@ -176,10 +156,6 @@ export default function OAuthCallback() {
         }
 
         // Exchange code for session token
-        console.log("[OAuth] Exchanging code for session token...", {
-          code: code.substring(0, 20) + "...",
-          state: state.substring(0, 20) + "...",
-        });
         const result = await Api.exchangeOAuthCode(code, state);
         console.log("[OAuth] Exchange result:", {
           hasSessionToken: !!result.sessionToken,
@@ -187,36 +163,32 @@ export default function OAuthCallback() {
         });
 
         if (result.sessionToken) {
-          console.log("[OAuth] Session token received, storing...");
           // Store session token
           await Auth.setSessionToken(result.sessionToken);
-          console.log("[OAuth] Session token stored successfully");
+
+          const validatedUser = await Api.validateSession();
+          if (!validatedUser) {
+            await Auth.removeSessionToken();
+            throw new Error("The received session could not be validated.");
+          }
 
           // Store user info if available
-          if (result.user) {
-            console.log("[OAuth] User data received:", result.user);
+          if (validatedUser) {
             const userInfo: Auth.User = {
-              id: result.user.id,
-              openId: result.user.openId,
-              name: result.user.name,
-              email: result.user.email,
-              loginMethod: result.user.loginMethod,
-              lastSignedIn: new Date(result.user.lastSignedIn || Date.now()),
+              id: validatedUser.id,
+              openId: validatedUser.openId,
+              name: validatedUser.name,
+              email: validatedUser.email,
+              loginMethod: validatedUser.loginMethod,
+              lastSignedIn: new Date(validatedUser.lastSignedIn),
             };
             await Auth.setUserInfo(userInfo);
-            console.log("[OAuth] User info stored:", userInfo);
-          } else {
+            } else {
             console.log("[OAuth] No user data in result");
           }
 
           setStatus("success");
-          console.log("[OAuth] Authentication successful, redirecting to home...");
-
-          // Redirect to home after a short delay
-          setTimeout(() => {
-            console.log("[OAuth] Executing redirect...");
-            router.replace("/(tabs)");
-          }, 1000);
+          router.replace("/(tabs)");
         } else {
           console.error("[OAuth] No session token in result:", result);
           setStatus("error");
@@ -269,3 +241,5 @@ export default function OAuthCallback() {
     </SafeAreaView>
   );
 }
+
+

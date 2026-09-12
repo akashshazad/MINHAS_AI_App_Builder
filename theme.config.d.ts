@@ -1,3 +1,4 @@
+
 export const themeColors: {
   primary: { light: string; dark: string };
   background: { light: string; dark: string };
@@ -15,3 +16,5 @@ declare const themeConfig: {
 };
 
 export default themeConfig;
+
+

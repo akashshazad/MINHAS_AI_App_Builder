@@ -1,3 +1,4 @@
+
 // Load environment variables with proper priority (system > .env)
 import "./scripts/load-env.js";
 import type { ExpoConfig } from "expo/config";
@@ -6,7 +7,7 @@ import type { ExpoConfig } from "expo/config";
 // e.g., "my-app" created at 2024-01-15 10:30:45 -> "space.manus.my.app.t20240115103045"
 // Bundle ID can only contain letters, numbers, and dots
 // Android requires each dot-separated segment to start with a letter
-const rawBundleId = "com.app.minhasaiappbuilder";
+const rawBundleId = process.env.MINHAS_APP_BUNDLE_ID ?? "com.minhas.ai.builder";
 const bundleId =
   rawBundleId
     .replace(/[-_]/g, ".") // Replace hyphens/underscores with dots
@@ -23,11 +24,10 @@ const bundleId =
     .join(".") || "space.manus.app";
 // Extract timestamp from bundle ID and prefix with "manus" for deep link scheme
 // e.g., "space.manus.my.app.t20240115103045" -> "manus20240115103045"
-const timestamp = bundleId.split(".").pop()?.replace(/^t/, "") ?? "";
-const schemeFromBundleId = `manus${timestamp}`;
+const schemeFromBundleId = process.env.MINHAS_APP_SCHEME ?? `minhas-${bundleId.replace(/\./g, "-")}`;
 
 const env = {
-  // App branding - update these values directly (do not use env vars)
+  // App branding defaults; production/generated builds may override via environment.
   appName: "MINHAS AI App Builder",
   appSlug: "minhas-ai-app-builder",
   // S3 URL of the app logo - set this to the URL returned by generate_image when creating custom logo
@@ -72,7 +72,6 @@ const config: ExpoConfig = {
         data: [
           {
             scheme: env.scheme,
-            host: "*",
           },
         ],
         category: ["BROWSABLE", "DEFAULT"],
@@ -128,3 +127,5 @@ const config: ExpoConfig = {
 };
 
 export default config;
+
+

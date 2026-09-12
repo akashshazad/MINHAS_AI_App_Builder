@@ -1,3 +1,4 @@
+
 import * as Linking from "expo-linking";
 import * as ReactNative from "react-native";
 
@@ -30,20 +31,21 @@ export const API_BASE_URL = env.apiBaseUrl;
  * URL pattern: https://PORT-sandboxid.region.domain
  */
 export function getApiBaseUrl(): string {
-  // If API_BASE_URL is set, use it
-  if (API_BASE_URL) {
-    return API_BASE_URL.replace(/\/$/, "");
-  }
-
-  // On web, derive from current hostname by replacing port 8081 with 3000
   if (ReactNative.Platform.OS === "web" && typeof window !== "undefined" && window.location) {
     const { protocol, hostname } = window.location;
+    // Published WebDev apps serve the client and API from one public origin.
+    // Do not keep calling a stale preview API after publication.
+    if (hostname.endsWith(".manus.space") && API_BASE_URL && !API_BASE_URL.includes(".manus.space")) {
+      return window.location.origin;
+    }
     // Pattern: 8081-sandboxid.region.domain -> 3000-sandboxid.region.domain
     const apiHostname = hostname.replace(/^8081-/, "3000-");
-    if (apiHostname !== hostname) {
+    if (apiHostname !== hostname && (!API_BASE_URL || API_BASE_URL.includes(".manus.computer"))) {
       return `${protocol}//${apiHostname}`;
     }
   }
+
+  if (API_BASE_URL) return API_BASE_URL.replace(/\/$/, "");
 
   // Fallback to empty (will use relative URL)
   return "";
@@ -102,6 +104,9 @@ export const getLoginUrl = () => {
  * @returns Always null, the callback is handled via deep link.
  */
 export async function startOAuthLogin(): Promise<string | null> {
+  if (!OAUTH_PORTAL_URL || !APP_ID) {
+    throw new Error("Login is not configured: OAuth portal or app ID is missing.");
+  }
   const loginUrl = getLoginUrl();
 
   if (ReactNative.Platform.OS === "web") {
@@ -112,20 +117,15 @@ export async function startOAuthLogin(): Promise<string | null> {
     return null;
   }
 
-  const supported = await Linking.canOpenURL(loginUrl);
-  if (!supported) {
-    console.warn("[OAuth] Cannot open login URL: URL scheme not supported");
-    // 可考虑抛出错误或返回错误状态，让调用方处理
-    return null;
-  }
-
   try {
     await Linking.openURL(loginUrl);
   } catch (error) {
     console.error("[OAuth] Failed to open login URL:", error);
-    // 可考虑抛出错误让调用方处理
+    throw new Error("Unable to open the secure login page. Check that a browser is installed and try again.");
   }
 
   // The OAuth callback will reopen the app via deep link.
   return null;
 }
+
+

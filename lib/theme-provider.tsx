@@ -1,3 +1,4 @@
+
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Appearance, View, useColorScheme as useSystemColorScheme } from "react-native";
 import { colorScheme as nativewindColorScheme, vars } from "nativewind";
@@ -77,3 +78,5 @@ export function useThemeContext(): ThemeContextValue {
   }
   return ctx;
 }
+
+

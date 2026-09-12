@@ -1,3 +1,4 @@
+
 import type { PropsWithChildren, ReactElement } from "react";
 import { View } from "react-native";
 import Animated, {
@@ -78,3 +79,5 @@ export default function ParallaxScrollView({
     </Animated.ScrollView>
   );
 }
+
+

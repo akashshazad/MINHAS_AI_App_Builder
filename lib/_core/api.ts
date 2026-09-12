@@ -1,3 +1,4 @@
+
 import { Platform } from "react-native";
 import { getApiBaseUrl } from "@/constants/oauth";
 import * as Auth from "./auth";
@@ -141,6 +142,17 @@ export async function getMe(): Promise<{
   }
 }
 
+export async function validateSession(): Promise<{
+  id: number;
+  openId: string;
+  name: string | null;
+  email: string | null;
+  loginMethod: string | null;
+  lastSignedIn: string;
+} | null> {
+  return getMe();
+}
+
 // Establish session cookie on the backend (3000-xxx domain)
 // Called after receiving token via postMessage to get a proper Set-Cookie from the backend
 export async function establishSession(token: string): Promise<boolean> {
@@ -170,3 +182,5 @@ export async function establishSession(token: string): Promise<boolean> {
     return false;
   }
 }
+
+

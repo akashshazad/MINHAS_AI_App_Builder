@@ -1,3 +1,4 @@
+
 const { getDefaultConfig } = require("expo/metro-config");
 const { withNativeWind } = require("nativewind/metro");
 
@@ -9,3 +10,5 @@ module.exports = withNativeWind(config, {
   // This fixes iOS styling issues in development mode
   forceWriteFileSystem: true,
 });
+
+

@@ -1,3 +1,4 @@
+
 import { PropsWithChildren, useState } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 
@@ -28,3 +29,5 @@ export function Collapsible({ children, title }: PropsWithChildren & { title: st
     </View>
   );
 }
+
+

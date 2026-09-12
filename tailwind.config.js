@@ -1,3 +1,4 @@
+
 const { themeColors } = require("./theme.config");
 const plugin = require("tailwindcss/plugin");
 
@@ -31,3 +32,5 @@ module.exports = {
     }),
   ],
 };
+
+

@@ -1,3 +1,4 @@
+
 import { createTRPCReact } from "@trpc/react-query";
 import { httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
@@ -40,3 +41,5 @@ export function createTRPCClient() {
     ],
   });
 }
+
+

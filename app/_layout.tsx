@@ -1,3 +1,4 @@
+
 import "@/global.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
@@ -8,6 +9,8 @@ import "react-native-reanimated";
 import { Platform } from "react-native";
 import "@/lib/_core/nativewind-pressable";
 import { ThemeProvider } from "@/lib/theme-provider";
+import { AppStoreProvider } from "@/store/app-store";
+import { initializeMonitoring } from "@/lib/monitoring/config";
 import {
   SafeAreaFrameContext,
   SafeAreaInsetsContext,
@@ -36,6 +39,7 @@ export default function RootLayout() {
   // Initialize Manus runtime for cookie injection from parent container
   useEffect(() => {
     initManusRuntime();
+    initializeMonitoring();
   }, []);
 
   const handleSafeAreaUpdate = useCallback((metrics: Metrics) => {
@@ -80,6 +84,7 @@ export default function RootLayout() {
 
   const content = (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <AppStoreProvider>
       <trpc.Provider client={trpcClient} queryClient={queryClient}>
         <QueryClientProvider client={queryClient}>
           {/* Default to hiding native headers so raw route segments don't appear (e.g. "(tabs)", "products/[id]"). */}
@@ -92,6 +97,7 @@ export default function RootLayout() {
           <StatusBar style="auto" />
         </QueryClientProvider>
       </trpc.Provider>
+      </AppStoreProvider>
     </GestureHandlerRootView>
   );
 
@@ -117,3 +123,5 @@ export default function RootLayout() {
     </ThemeProvider>
   );
 }
+
+

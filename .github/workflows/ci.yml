@@ -1,0 +1,52 @@
+
+name: MINHAS Production CI
+on:
+  push:
+    branches: [main, master, release/**]
+  pull_request:
+    branches: [main, master, release/**]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: minhas-ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run check
+      - run: pnpm run lint
+      - run: pnpm test
+      - run: pnpm run preflight
+      - run: pnpm run production:preflight
+      - run: pnpm run build
+      - name: Verify production bundle
+        run: test -s dist/index.js
+
+  production-v43-selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run release:v43-selftest
+
+

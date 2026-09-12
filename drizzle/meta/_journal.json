@@ -1,3 +1,4 @@
+
 {
   "version": "7",
   "dialect": "mysql",
@@ -8,6 +9,35 @@
       "when": 1763372440610,
       "tag": "0000_elite_eternals",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1788865899189,
+      "tag": "0001_chubby_toxin",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1788866627396,
+      "tag": "0002_silky_valeria_richards",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1788871249221,
+      "tag": "0003_awesome_magik",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1788875797452,
+      "tag": "0004_chilly_vin_gonzales",
+      "breakpoints": true
     }
   ]
 }
+

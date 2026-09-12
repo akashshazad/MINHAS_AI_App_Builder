@@ -1,12 +1,30 @@
+
 import { COOKIE_NAME, ONE_YEAR_MS } from "../../shared/const.js";
 import type { Express, Request, Response } from "express";
 import { getUserByOpenId, upsertUser } from "../db";
 import { getSessionCookieOptions } from "./cookies";
-import { sdk } from "./sdk";
+import { getAllowedOAuthRedirectUris, sdk } from "./sdk";
 
 function getQueryParam(req: Request, key: string): string | undefined {
   const value = req.query[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function getFrontendUrl(req: Request) {
+  const explicit = process.env.PUBLIC_APP_URL || process.env.EXPO_PUBLIC_WEB_URL;
+  if (explicit) return explicit.replace(/\/$/, "");
+  if (process.env.NODE_ENV !== "production") {
+    const preview = process.env.EXPO_WEB_PREVIEW_URL || process.env.EXPO_PACKAGER_PROXY_URL;
+    if (preview) return preview.replace(/\/$/, "");
+    const forwardedHost = req.headers["x-forwarded-host"];
+    const host = typeof forwardedHost === "string" ? forwardedHost.split(",")[0]?.trim() : req.get("host");
+    const forwardedProto = req.headers["x-forwarded-proto"];
+    const protocol = typeof forwardedProto === "string" ? forwardedProto.split(",")[0]?.trim() : req.protocol;
+    return host ? `${protocol || "https"}://${host}` : "http://localhost:8081";
+  }
+  const exactWebCallback = getAllowedOAuthRedirectUris().find((uri) => uri.endsWith("/api/oauth/callback"));
+  if (!exactWebCallback) throw new Error("PUBLIC_APP_URL or an exact web OAuth redirect URI is required in production.");
+  return exactWebCallback.slice(0, -"/api/oauth/callback".length);
 }
 
 async function syncUser(userInfo: {
@@ -85,10 +103,7 @@ export function registerOAuthRoutes(app: Express) {
 
       // Redirect to the frontend URL (Expo web on port 8081)
       // Cookie is set with parent domain so it works across both 3000 and 8081 subdomains
-      const frontendUrl =
-        process.env.EXPO_WEB_PREVIEW_URL ||
-        process.env.EXPO_PACKAGER_PROXY_URL ||
-        "http://localhost:8081";
+      const frontendUrl = getFrontendUrl(req);
       res.redirect(302, frontendUrl);
     } catch (error) {
       console.error("[OAuth] Callback failed", error);
@@ -172,3 +187,5 @@ export function registerOAuthRoutes(app: Express) {
     }
   });
 }
+
+

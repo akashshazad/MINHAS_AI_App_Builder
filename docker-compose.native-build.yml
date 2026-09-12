@@ -1,0 +1,32 @@
+
+services:
+  minhas-native-build-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.native-build-service
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,noexec,nosuid
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 4g
+    cpus: 2.0
+    ports:
+      - "127.0.0.1:4100:4100"
+    environment:
+      BUILD_SERVICE_PORT: "4100"
+      BUILD_SERVICE_HOST: "0.0.0.0"
+      BUILD_SERVICE_TOKEN: "${BUILD_SERVICE_TOKEN}"
+      NATIVE_WORKSPACE_ROOT: /var/lib/minhas/native-workspaces
+      NATIVE_ARTIFACT_ROOT: /var/lib/minhas/native-artifacts
+    volumes:
+      - native-artifacts:/var/lib/minhas/native-artifacts
+      - native-workspaces:/var/lib/minhas/native-workspaces
+
+volumes:
+  native-artifacts:
+  native-workspaces:
+
+

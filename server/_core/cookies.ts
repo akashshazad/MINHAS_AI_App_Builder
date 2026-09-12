@@ -1,3 +1,4 @@
+
 import type { CookieOptions, Request } from "express";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
@@ -24,37 +25,32 @@ function isSecureRequest(req: Request) {
  * e.g., "3000-xxx.manuspre.computer" -> ".manuspre.computer"
  * This allows cookies set by 3000-xxx to be read by 8081-xxx
  */
-function getParentDomain(hostname: string): string | undefined {
-  // Don't set domain for localhost or IP addresses
-  if (LOCAL_HOSTS.has(hostname) || isIpAddress(hostname)) {
-    return undefined;
-  }
-
-  // Split hostname into parts
-  const parts = hostname.split(".");
-
-  // Need at least 3 parts for a subdomain (e.g., "3000-xxx.manuspre.computer")
-  // For "manuspre.computer", we can't set a parent domain
-  if (parts.length < 3) {
-    return undefined;
-  }
-
-  // Return parent domain with leading dot (e.g., ".manuspre.computer")
-  // This allows cookie to be shared across all subdomains
-  return "." + parts.slice(-2).join(".");
+function getConfiguredCookieDomain(hostname: string) {
+  const configured = process.env.SESSION_COOKIE_DOMAIN?.trim() || (hostname.endsWith(".manus.computer") ? "manus.computer" : undefined);
+  if (!configured) return undefined;
+  const domain = configured.replace(/^\\./, "").toLowerCase();
+  if (!domain || domain.includes("/") || domain.includes(":") || domain.includes("..")) return undefined;
+  if (LOCAL_HOSTS.has(hostname) || isIpAddress(hostname)) return undefined;
+  if (hostname !== domain && !hostname.endsWith(`.${domain}`)) return undefined;
+  return `.${domain}`;
 }
 
 export function getSessionCookieOptions(
   req: Request,
 ): Pick<CookieOptions, "domain" | "httpOnly" | "path" | "sameSite" | "secure"> {
-  const hostname = req.hostname;
-  const domain = getParentDomain(hostname);
+  const forwardedHost = req.headers["x-forwarded-host"];
+  const requestHost = req.headers.host;
+  const hostname = String(req.hostname ?? (Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost ?? requestHost ?? "localhost")).split(",")[0].split(":")[0] || "localhost";
+  const domain = getConfiguredCookieDomain(hostname);
 
   return {
     domain,
     httpOnly: true,
     path: "/",
-    sameSite: "none",
+    // The Expo web client and API use sibling subdomains, which are same-site.
+    // Lax avoids browsers rejecting the session as an unnecessary third-party cookie.
+    sameSite: "lax",
     secure: isSecureRequest(req),
   };
 }
+

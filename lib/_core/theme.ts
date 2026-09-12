@@ -1,3 +1,4 @@
+
 import { Platform } from "react-native";
 
 import themeConfig from "@/theme.config";
@@ -83,3 +84,5 @@ export const Fonts = Platform.select({
     mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
   },
 });
+
+

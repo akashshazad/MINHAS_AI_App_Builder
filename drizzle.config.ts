@@ -1,3 +1,4 @@
+
 import { defineConfig } from "drizzle-kit";
 
 const connectionString = process.env.DATABASE_URL;
@@ -13,3 +14,5 @@ export default defineConfig({
     url: connectionString,
   },
 });
+
+

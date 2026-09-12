@@ -1,3 +1,4 @@
+
 /**
  * Manus Runtime - Communication layer between Expo web app and parent container (next-agent-webapp)
  *
@@ -119,3 +120,5 @@ export function initManusRuntime(): void {
 export function isRunningInPreviewIframe(): boolean {
   return isWeb() && isInIframe();
 }
+
+

@@ -1,3 +1,4 @@
+
 import { AXIOS_TIMEOUT_MS, COOKIE_NAME, ONE_YEAR_MS } from "../../shared/const.js";
 import { ForbiddenError } from "../../shared/_core/errors.js";
 import axios, { type AxiosInstance } from "axios";
@@ -17,6 +18,18 @@ import type {
 // Utility function
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0;
+
+export function getAllowedOAuthRedirectUris(): string[] {
+  const configured = (process.env.OAUTH_ALLOWED_REDIRECT_URIS ?? "")
+    .split(",")
+    .map((value) => value.trim().replace(/\/$/, ""))
+    .filter((value) => value.length > 0 && !value.includes("*"));
+  const nativeRedirect = process.env.OAUTH_NATIVE_REDIRECT_URI?.trim().replace(/\/$/, "");
+  if (nativeRedirect && !nativeRedirect.includes("*")) configured.push(nativeRedirect);
+  const publicAppUrl = process.env.PUBLIC_APP_URL?.trim().replace(/\/$/, "");
+  if (publicAppUrl) configured.push(`${publicAppUrl}/api/oauth/callback`);
+  return [...new Set(configured)];
+}
 
 export type SessionPayload = {
   openId: string;
@@ -39,7 +52,10 @@ class OAuthService {
   }
 
   private decodeState(state: string): string {
-    const redirectUri = atob(state);
+    const redirectUri = Buffer.from(state, "base64").toString("utf8").replace(/\/$/, "");
+    if (!redirectUri || redirectUri.includes("*") || !getAllowedOAuthRedirectUris().includes(redirectUri)) {
+      throw new Error("OAuth redirect URI is not in the exact server allowlist.");
+    }
     return redirectUri;
   }
 
@@ -317,3 +333,5 @@ function buildCronUser(userInfo: GetUserInfoWithJwtResponse): AuthenticatedUser 
 }
 
 export const sdk = new SDKServer();
+
+

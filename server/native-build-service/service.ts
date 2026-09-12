@@ -1,0 +1,48 @@
+
+import express, { type Express } from "express";
+import crypto from "node:crypto";
+import { nativeWorkerRequest } from "../native-worker/contract";
+import { BuildQueue } from "./queue";
+import { LocalArtifactStore, signArtifact, verifyArtifactSignature } from "./artifact-store";
+import { ReleaseControlPlane } from "./release-control-plane";
+import { getHAHealth } from "./ha";
+import { SlidingWindowRateLimiter } from "./rate-limit";
+import { IdempotencyCache } from "./idempotency";
+
+const MAX_BODY_BYTES = 55 * 1024 * 1024;
+const MAX_TTL_MS = 15 * 60_000;
+const MIN_TTL_MS = 30_000;
+function constantTimeEqual(a:string,b:string){const aa=Buffer.from(a),bb=Buffer.from(b);return aa.length===bb.length&&crypto.timingSafeEqual(aa,bb)}
+function auth(req:express.Request,res:express.Response,next:express.NextFunction){const expected=process.env.BUILD_SERVICE_TOKEN; if(!expected)return res.status(503).json({error:"Build service is not configured."}); const h=req.header("authorization")||"",t=h.startsWith("Bearer ")?h.slice(7):""; if(!t||!constantTimeEqual(t,expected))return res.status(401).json({error:"Unauthorized"});next()}
+
+export function createNativeBuildService(queue=new BuildQueue(), artifactStore=new LocalArtifactStore(), releases=new ReleaseControlPlane(), rateLimiter=new SlidingWindowRateLimiter(Number(process.env.BUILD_API_RATE_LIMIT||60)), idempotency=new IdempotencyCache()):Express{
+ const app=express(); app.disable("x-powered-by"); app.use(express.json({limit:MAX_BODY_BYTES}));
+ app.get("/live",(_req,res)=>res.status(200).json({ok:true,service:"native-build-service",timestamp:Date.now()}));
+ app.get("/health",async(_req,res)=>{ const ha=await getHAHealth(queue); const ok=ha.healthy && releases.configured; const body={ok,service:"native-build-service",durability:queue.durable,releaseControl:releases.configured,ha,timestamp:Date.now()}; return res.status(ok?200:503).json(body); }); app.use("/v1",(req,res,next)=>{
+   const key = req.ip || req.header("x-forwarded-for") || "unknown";
+   const result = rateLimiter.check(key);
+   res.setHeader("x-ratelimit-remaining", String(result.remaining));
+   if(!result.allowed){res.setHeader("retry-after", String(Math.ceil(result.retryAfterMs/1000))); return res.status(429).json({error:"Rate limit exceeded"});}
+   return auth(req,res,next);
+ });
+ app.post("/v1/releases",async(req,res)=>{const idempotencyKey=String(req.header("idempotency-key")||"").trim(); if(idempotencyKey.length>128)return res.status(400).json({error:"Invalid Idempotency-Key"}); const parsed=nativeWorkerRequest.safeParse(req.body?.request||req.body);if(!parsed.success)return res.status(400).json({error:"Invalid native build request",issues:parsed.error.issues}); const fp=idempotency.fingerprint({request:parsed.data,version:typeof req.body?.version==="string"?req.body.version:undefined}); if(idempotencyKey){try{const cached=idempotency.get(idempotencyKey,fp); if(cached)return res.status(200).json(cached);}catch(e){return res.status(409).json({error:e instanceof Error?e.message:"Idempotency conflict"})}} if(!releases.configured)return res.status(503).json({error:"Release control database is not configured."});try{const job=await queue.enqueue(parsed.data);const release=await releases.create({projectId:parsed.data.projectId,projectName:parsed.data.projectName,buildType:parsed.data.buildType,requestJson:JSON.stringify(parsed.data),version:typeof req.body?.version==="string"?req.body.version:undefined,buildJobId:job.id});const response={releaseId:release.id,buildJobId:job.id,state:release.state}; if(idempotencyKey)idempotency.set(idempotencyKey,fp,response); return res.status(202).json(response);}catch(e){return res.status(503).json({error:e instanceof Error?e.message:"Release unavailable"})}});
+ app.get("/v1/releases/:id",async(req,res)=>{if(!releases.configured)return res.status(503).json({error:"Release control database is not configured."});const release=await releases.get(req.params.id);if(!release)return res.status(404).json({error:"Release not found"});return res.json(release)});
+ app.post("/v1/releases/:id/publish",async(_req,res)=>{if(!releases.configured)return res.status(503).json({error:"Release control database is not configured."});try{const release=await releases.publish(_req.params.id);if(!release)return res.status(404).json({error:"Release not found"});await releases.audit(release.id,"publish","build-service");return res.json(release)}catch(e){return res.status(409).json({error:e instanceof Error?e.message:"Release cannot be published"})}});
+ app.post("/v1/releases/:id/rollback",async(req,res)=>{if(!releases.configured)return res.status(503).json({error:"Release control database is not configured."});try{const release=await releases.rollback(req.params.id);if(!release)return res.status(404).json({error:"Release not found"});await releases.audit(release.id,"rollback","build-service");return res.json(release)}catch(e){return res.status(409).json({error:e instanceof Error?e.message:"Release cannot be rolled back"})}});
+ app.get("/v1/releases/:id/audit",async(req,res)=>{if(!releases.configured)return res.status(503).json({error:"Release control database is not configured."});try{return res.json(await releases.auditTrail(req.params.id,Number(req.query.limit)||100));}catch(e){return res.status(404).json({error:e instanceof Error?e.message:"Audit unavailable"})}});
+ app.post("/v1/releases/:id/state",async(req,res)=>{if(!releases.configured)return res.status(503).json({error:"Release control database is not configured."});try{const release=await releases.update(req.params.id,{state:req.body?.state, gates:req.body?.gates, manifest:req.body?.manifest});if(!release)return res.status(404).json({error:"Release not found"});await releases.audit(release.id,`state:${release.state}`,"build-service",{gates:release.gates});return res.json(release)}catch(e){return res.status(409).json({error:e instanceof Error?e.message:"Invalid release transition"})}});
+ app.post("/v1/builds",async(req,res)=>{const idempotencyKey=String(req.header("idempotency-key")||"").trim(); if(idempotencyKey.length>128)return res.status(400).json({error:"Invalid Idempotency-Key"}); const parsed=nativeWorkerRequest.safeParse(req.body);if(!parsed.success)return res.status(400).json({error:"Invalid native build request",issues:parsed.error.issues}); const fp=idempotency.fingerprint(parsed.data); if(idempotencyKey){try{const cached=idempotency.get(idempotencyKey,fp); if(cached)return res.status(200).json(cached);}catch(e){return res.status(409).json({error:e instanceof Error?e.message:"Idempotency conflict"})}} try{const job=await queue.enqueue(parsed.data); const response={id:job.id,status:job.status,engine:"native"}; if(idempotencyKey)idempotency.set(idempotencyKey,fp,response);return res.status(202).json(response)}catch(e){return res.status(503).json({error:e instanceof Error?e.message:"Queue unavailable"})}});
+ app.get("/v1/builds/:id",async(req,res)=>{const job=await queue.get(req.params.id);if(!job)return res.status(404).json({error:"Build not found"});return res.json({id:job.id,status:job.status,engine:"native",logs:job.logs,error:job.error,artifact:job.artifactJson?JSON.parse(job.artifactJson):undefined,createdAt:job.createdAt,updatedAt:job.updatedAt,worker:{id:job.workerId,heartbeatAt:job.heartbeatAt,leaseUntil:job.leaseUntil}})});
+ app.post("/v1/builds/:id/cancel",async(req,res)=>{const ok=await queue.cancel(req.params.id);return res.status(ok?200:409).json({id:req.params.id,cancelled:ok})});
+ app.get("/v1/artifacts/:jobId/:fileName",async(req,res)=>{const key=`${req.params.jobId}/${req.params.fileName}`; const exp=Number(req.query.expiresAt); const sig=String(req.query.signature||""); if(!Number.isSafeInteger(exp)||!verifyArtifactSignature(key,exp,sig)) return res.status(403).json({error:"Invalid or expired artifact signature"}); try{const data=await artifactStore.read(key); res.type("application/octet-stream").setHeader("content-disposition",`attachment; filename="${req.params.fileName.replace(/[^A-Za-z0-9._-]/g,"_")}"`).send(data);}catch{return res.status(404).json({error:"Artifact not found"})}});
+ app.post("/v1/builds/:id/artifact-url",async(req,res)=>{const job=await queue.get(req.params.id);if(!job?.artifactJson)return res.status(404).json({error:"Artifact not available"});const artifact=JSON.parse(job.artifactJson) as {storageKey?:string};if(!artifact.storageKey)return res.status(409).json({error:"Artifact has no durable storage key"});const requestedTtl=Number(req.body?.ttlMs); const ttl=Number.isFinite(requestedTtl)?Math.min(MAX_TTL_MS,Math.max(MIN_TTL_MS,Math.floor(requestedTtl))):5*60_000; const expiresAt=Date.now()+ttl;return res.json({url:`/v1/artifacts/${artifact.storageKey}?expiresAt=${expiresAt}&signature=${signArtifact(artifact.storageKey,expiresAt)}`,expiresAt})});
+ void queue.start(); return app;
+}
+export async function startNativeBuildService(){const port=Number(process.env.BUILD_SERVICE_PORT||4100),host=process.env.BUILD_SERVICE_HOST||"0.0.0.0";const queue = new BuildQueue(); const releases = new ReleaseControlPlane(); const app=createNativeBuildService(queue, new LocalArtifactStore(), releases);return new Promise<void>(resolve=>{
+  const server=app.listen(port,host,()=>{console.log(`[native-build-service] listening on ${host}:${port}`);resolve()});
+  const shutdown=async(signal:string)=>{console.log(`[native-build-service] ${signal}: graceful shutdown`);await queue.stop();await releases.close();server.close();};
+  process.once("SIGTERM",()=>void shutdown("SIGTERM"));
+  process.once("SIGINT",()=>void shutdown("SIGINT"));
+})}
+
+
