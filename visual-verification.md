@@ -1,0 +1,3 @@
+# Visual verification
+
+The mobile preview was captured at 375x812 after the prompt-first redesign. The home screen now presents MINHAS AI branding, a single large prompt composer, attachment plus action, clear action, microphone action, send/build action, and recent projects. The previous “START FROM A TEMPLATE” and “TRY AN IDEA” sections are absent. Projects and Settings routes still render with the existing bottom navigation. The first capture showed the send button glyph was not visible; the `arrow.up` Material icon mapping was added before the final verification pass. Settings capability rows correctly show `Loading…` before health queries resolve rather than falsely showing `BLOCKED`.

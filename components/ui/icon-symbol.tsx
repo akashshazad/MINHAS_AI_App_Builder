@@ -21,6 +21,7 @@ const MAPPING = {
   "exclamationmark.triangle.fill": "warning",
   "person.circle.fill": "account-circle",
   "arrow.up.right.square": "open-in-new",
+  "arrow.up": "arrow-upward",
   "plus": "add",
   "bot.fill": "smart-toy",
   "photo.fill": "image",
@@ -49,5 +50,4 @@ export function IconSymbol({
 }) {
   return <MaterialIcons color={color} size={size} name={MAPPING[name]} style={style} />;
 }
-
 
