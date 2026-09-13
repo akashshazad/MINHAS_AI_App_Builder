@@ -3,6 +3,8 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
+import fs from "node:fs";
+import path from "node:path";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
@@ -67,6 +69,18 @@ async function startServer() {
       createContext,
     }),
   );
+
+  if (process.env.NODE_ENV === "production") {
+    const clientDist = path.resolve(process.cwd(), "dist/client");
+    const indexFile = path.join(clientDist, "index.html");
+    if (fs.existsSync(clientDist)) {
+      app.use(express.static(clientDist));
+      app.get("*", (req, res, next) => {
+        if (req.path.startsWith("/api/")) return next();
+        return fs.existsSync(indexFile) ? res.sendFile(indexFile) : next();
+      });
+    }
+  }
 
   // Keep the error boundary last so every downstream failure gets a request ID.
   app.use(createErrorHandler());

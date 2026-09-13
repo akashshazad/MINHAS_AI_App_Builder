@@ -104,7 +104,7 @@ export default function ProjectWorkspace() {
       </ScrollView> : null}
 
       {section === "plan" ? <ScrollView contentContainerStyle={styles.scroll}>
-        <View className="mt-5 rounded-3xl bg-surface p-5 shadow-sm"><Text className="text-xs font-semibold tracking-[1.4px] text-primary">AI PROJECT PLAN</Text><Text className="mt-2 text-2xl font-bold text-foreground">{plan.summary}</Text><Text className="mt-3 text-sm leading-5 text-muted">Review this plan before generating the editable workspace. The plan is persisted to your project.</Text></View>
+        <View className="mt-5 rounded-3xl bg-surface p-5 shadow-sm"><Text className="text-xs font-semibold tracking-[1.4px] text-primary">AI PROJECT PLAN · VALIDATED</Text><Text className="mt-2 text-2xl font-bold text-foreground">{plan.summary}</Text><Text className="mt-3 text-sm leading-5 text-muted">This plan is persisted with an editable workspace, initial restore point, main branch, and local commit. Review it before making changes.</Text></View>
         <PlanSection title="Requirements" items={plan.requirements} />
         <PlanSection title="Pages & components" items={[...plan.pages, ...plan.components]} />
         <PlanSection title="Data & APIs" items={[...plan.database, ...plan.apis]} empty="No database or API requirements detected yet." />
@@ -112,7 +112,7 @@ export default function ProjectWorkspace() {
         <Text className="mt-6 text-xs font-semibold tracking-[1.4px] text-muted">WORKSPACE ACTIONS</Text>
         <View className="mt-3 gap-2">
           <ActionButton icon="sparkles" label={autonomous.isPending ? "Starting autonomous pipeline…" : "Run autonomous software factory"} onPress={() => autonomous.mutate({ projectId })} disabled={autonomous.isPending || Boolean(pipelineRunId)} />
-          <ActionButton icon="sparkles" label={files.length ? (regenerate.isPending ? "Regenerating workspace…" : "Regenerate workspace safely") : generate.isPending ? "Generating workspace…" : "Generate editable workspace"} onPress={() => files.length ? Alert.alert("Regenerate workspace", "A restore point will be created before replacing the current generated files. Continue?", [{ text: "Cancel", style: "cancel" }, { text: "Regenerate", style: "destructive", onPress: () => regenerate.mutate({ projectId, confirm: true }) }]) : generate.mutate({ projectId })} disabled={generate.isPending || regenerate.isPending} />
+          <ActionButton icon="sparkles" label={files.length ? (regenerate.isPending ? "Regenerating workspace…" : "Regenerate workspace safely") : generate.isPending ? "Initializing legacy workspace…" : "Initialize legacy workspace"} onPress={() => files.length ? Alert.alert("Regenerate workspace", "A restore point will be created before replacing the current generated files. Continue?", [{ text: "Cancel", style: "cancel" }, { text: "Regenerate", style: "destructive", onPress: () => regenerate.mutate({ projectId, confirm: true }) }]) : generate.mutate({ projectId })} disabled={generate.isPending || regenerate.isPending} />
           <View className="mt-2 rounded-2xl border border-border bg-surface p-3">
             <Text className="text-xs font-bold uppercase tracking-[1.2px] text-muted">Build Engine</Text>
             <View className="mt-2 flex-row gap-2">
@@ -168,4 +168,3 @@ const styles = StyleSheet.create({
   agentButton: { marginTop: 12, minHeight: 48, borderRadius: 15, backgroundColor: "#8EF5D5", alignItems: "center", justifyContent: "center", flexDirection: "row", paddingHorizontal: 16 },
   quickTask: { minHeight: 58, borderRadius: 16, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E4E7EC", paddingHorizontal: 15, paddingVertical: 11, flexDirection: "row", alignItems: "center" },
 });
-

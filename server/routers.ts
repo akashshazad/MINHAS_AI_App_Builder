@@ -81,15 +81,18 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const sourceLanguage = detectSourceLanguage(input.idea);
         const plan = await generatePlan(input.idea, input.type as ProjectType, input.attachments);
+        const generatedFiles = await generateStarterFiles(plan);
+        if (!generatedFiles.length) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "The coding agent returned no editable workspace files." });
         let projectId: number;
         try {
-          projectId = await db.createProjectWithEvent({ userId: ctx.user.id, name: plan.projectName, idea: input.idea, sourceLanguage, projectType: input.type, framework: plan.framework, status: "plan_ready", buildStatus: "not_checked", planJson: JSON.stringify(plan), deployStatus: "planned" }, { type: "plan_created", message: "AI created a structured project plan for review.", metadataJson: JSON.stringify({ sourceLanguage, idempotencyKey: input.idempotencyKey }) });
+          const bootstrap = await db.createProjectBootstrap({ userId: ctx.user.id, name: plan.projectName, idea: input.idea, sourceLanguage, projectType: input.type, framework: plan.framework, status: "workspace_ready", buildStatus: "not_checked", planJson: JSON.stringify(plan), deployStatus: "planned" }, generatedFiles, { type: "plan_validated", message: "AI created and validated the structured plan, then initialized the editable workspace.", metadataJson: JSON.stringify({ sourceLanguage, idempotencyKey: input.idempotencyKey, generatedFileCount: generatedFiles.length }) });
+          projectId = bootstrap.projectId;
         } catch (error) {
           const requestId = String(ctx.res.locals.requestId ?? "unknown");
           console.error("[projects.createPlan] transaction failed", { requestId, error: error instanceof Error ? error.message : "unknown" });
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Project creation failed. Your prompt has been preserved. Retry when ready. Request ID: ${requestId}` });
         }
-        return { projectId, project: { id: projectId, name: plan.projectName, sourceLanguage }, plan };
+        return { projectId, project: { id: projectId, name: plan.projectName, sourceLanguage }, plan, workspaceInitialized: true as const };
       }),
     get: protectedProcedure
       .input(z.object({ projectId: z.number().int().positive() }))

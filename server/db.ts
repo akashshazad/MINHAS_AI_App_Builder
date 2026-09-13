@@ -1,5 +1,6 @@
 
 import { and, desc, eq } from "drizzle-orm";
+import { createHash } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import {
@@ -121,6 +122,34 @@ export async function createProjectWithEvent(data: InsertProject, event: { type:
     if (!projectId) throw new Error("Project insert returned no generated ID");
     await tx.insert(projectEvents).values({ projectId, ...event });
     return projectId;
+  });
+}
+export async function createProjectBootstrap(data: InsertProject, files: Array<Omit<InsertProjectFile, "projectId">>, event: { type: string; message: string; metadataJson?: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  return db.transaction(async (tx) => {
+    let idempotencyKey = "";
+    try { idempotencyKey = String((event.metadataJson ? JSON.parse(event.metadataJson) : {}).idempotencyKey ?? ""); } catch { idempotencyKey = ""; }
+    if (idempotencyKey && event.metadataJson) {
+      const existing = await tx.select({ projectId: projectEvents.projectId }).from(projectEvents).innerJoin(projects, eq(projectEvents.projectId, projects.id)).where(and(eq(projectEvents.type, event.type), eq(projectEvents.metadataJson, event.metadataJson), eq(projects.userId, data.userId))).limit(1);
+      if (existing[0]?.projectId) return { projectId: existing[0].projectId, existing: true as const };
+    }
+    const projectId = insertId(await tx.insert(projects).values({ ...data, status: "workspace_ready", buildStatus: "not_checked" }));
+    if (!projectId) throw new Error("Project insert returned no generated ID");
+    const projectFilesRows = files.map((file) => ({ ...file, projectId, version: 1 }));
+    if (projectFilesRows.length) await tx.insert(projectFiles).values(projectFilesRows);
+    const snapshotFiles = files.map((file) => ({ path: file.path, language: file.language, content: file.content, isCritical: file.isCritical, version: 1 }));
+    const snapshotId = insertId(await tx.insert(projectSnapshots).values({ projectId, label: "Initial workspace", reason: "initial_bootstrap", planJson: data.planJson, filesJson: JSON.stringify(snapshotFiles) }));
+    if (!snapshotId) throw new Error("Initial workspace snapshot was not created");
+    const branchId = insertId(await tx.insert(gitBranches).values({ projectId, name: "main", baseSnapshotId: snapshotId, headSnapshotId: snapshotId, protected: true, isDefault: true, syncState: "local" }));
+    if (!branchId) throw new Error("Initial workspace branch was not created");
+    const treeHash = createHash("sha256").update(files.map((file) => `${file.path}\0${file.content}`).sort().join("\n")).digest("hex");
+    const commitId = insertId(await tx.insert(gitCommits).values({ projectId, branchId, snapshotId, message: "Initial workspace", treeHash, authorUserId: data.userId, pushState: "local" }));
+    if (!commitId) throw new Error("Initial workspace commit was not created");
+    await tx.update(projects).set({ activeGitBranchId: branchId }).where(eq(projects.id, projectId));
+    await tx.insert(projectEvents).values({ projectId, ...event });
+    await tx.insert(projectEvents).values({ projectId, type: "workspace_initialized", message: `Initialized editable workspace with ${files.length} file(s), main branch, snapshot, and initial commit.` });
+    return { projectId, snapshotId, branchId, commitId, existing: false as const };
   });
 }
 export async function insertProjectFiles(rows: InsertProjectFile[]) {
