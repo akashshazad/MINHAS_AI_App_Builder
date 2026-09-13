@@ -1,5 +1,5 @@
 
-import { boolean, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { boolean, int, mediumtext, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -17,7 +17,7 @@ export const projects = mysqlTable("projects", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
   name: varchar("name", { length: 160 }).notNull(),
-  idea: text("idea").notNull(),
+  idea: mediumtext("idea").notNull(),
   sourceLanguage: varchar("sourceLanguage", { length: 32 }).notNull(),
   projectType: varchar("projectType", { length: 32 }).notNull(),
   framework: varchar("framework", { length: 64 }).notNull(),
@@ -173,7 +173,7 @@ export const aiRuns = mysqlTable("aiRuns", {
   agentKey: varchar("agentKey", { length: 64 }).notNull(),
   model: varchar("model", { length: 120 }),
   status: varchar("status", { length: 32 }).default("queued").notNull(),
-  prompt: text("prompt").notNull(),
+  prompt: mediumtext("prompt").notNull(),
   toolsJson: text("toolsJson").notNull(),
   filesChangedJson: text("filesChangedJson"),
   tokensUsed: int("tokensUsed"),
@@ -359,5 +359,4 @@ export type InsertGitRepository = typeof gitRepositories.$inferInsert;
 export type InsertGitBranch = typeof gitBranches.$inferInsert;
 export type InsertGitCommit = typeof gitCommits.$inferInsert;
 export type InsertGitPullRequest = typeof gitPullRequests.$inferInsert;
-
 

@@ -27,8 +27,8 @@ export default function SettingsScreen() {
         </View>
         <Text className="mt-8 text-xs font-semibold tracking-[1.5px] text-muted">PLATFORM STATUS</Text>
         <View className="mt-3 rounded-3xl bg-surface p-5 shadow-sm">
-          <StatusRow label="AI planning + file generation" value={health.data?.ai.status === "ONLINE" ? "ONLINE" : "BLOCKED"} good={health.data?.ai.status === "ONLINE"} />
-          <StatusRow label="Cloud project persistence" value={health.data?.database.status === "ONLINE" ? "ONLINE" : "BLOCKED"} good={health.data?.database.status === "ONLINE"} />
+          <StatusRow label="AI planning + file generation" value={health.data ? health.data.ai.status : "Loading…"} good={health.data?.ai.status === "ONLINE"} />
+          <StatusRow label="Cloud project persistence" value={health.data ? health.data.database.status : "Loading…"} good={health.data?.database.status === "ONLINE"} />
           <StatusRow label="Remote build / live preview" value={status.data?.remoteBuild ?? "Loading…"} />
           <StatusRow label="Preview runtime" value={status.data?.previewRuntime ?? "Loading…"} />
           <StatusRow label="APK/AAB artifact management" value={status.data?.artifactManagement ?? "Loading…"} />

@@ -1,4 +1,3 @@
-
 {
   "version": "7",
   "dialect": "mysql",
@@ -37,7 +36,13 @@
       "when": 1788875797452,
       "tag": "0004_chilly_vin_gonzales",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1789268304151,
+      "tag": "0005_abandoned_wolverine",
+      "breakpoints": true
     }
   ]
 }
-

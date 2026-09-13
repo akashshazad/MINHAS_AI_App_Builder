@@ -106,6 +106,23 @@ export async function createProject(data: InsertProject) {
   if (!db) throw new Error("Database is not configured");
   return insertId(await db.insert(projects).values(data));
 }
+export async function createProjectWithEvent(data: InsertProject, event: { type: string; message: string; metadataJson?: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  return db.transaction(async (tx) => {
+    let idempotencyKey = "";
+    try { idempotencyKey = String((event.metadataJson ? JSON.parse(event.metadataJson) : {}).idempotencyKey ?? ""); } catch { idempotencyKey = ""; }
+    if (idempotencyKey && event.metadataJson) {
+      const metadataJson = event.metadataJson;
+      const existing = await tx.select({ projectId: projectEvents.projectId }).from(projectEvents).innerJoin(projects, eq(projectEvents.projectId, projects.id)).where(and(eq(projectEvents.type, event.type), eq(projectEvents.metadataJson, metadataJson), eq(projects.userId, data.userId))).limit(1);
+      if (existing[0]?.projectId) return existing[0].projectId;
+    }
+    const projectId = insertId(await tx.insert(projects).values(data));
+    if (!projectId) throw new Error("Project insert returned no generated ID");
+    await tx.insert(projectEvents).values({ projectId, ...event });
+    return projectId;
+  });
+}
 export async function insertProjectFiles(rows: InsertProjectFile[]) {
   const db = await getDb();
   if (!db) throw new Error("Database is not configured");
@@ -383,5 +400,3 @@ export async function createGitPullRequest(data: InsertGitPullRequest) { const d
 export async function listGitPullRequests(projectId: number) { const db = await getDb(); if (!db) return []; return db.select().from(gitPullRequests).where(eq(gitPullRequests.projectId, projectId)).orderBy(desc(gitPullRequests.createdAt)); }
 export async function getGitPullRequest(projectId: number, id: number) { const db = await getDb(); if (!db) return null; const rows = await db.select().from(gitPullRequests).where(and(eq(gitPullRequests.projectId, projectId), eq(gitPullRequests.id, id))).limit(1); return rows[0] ?? null; }
 export async function updateGitPullRequest(id: number, data: Partial<InsertGitPullRequest>) { const db = await getDb(); if (!db) throw new Error("Database is not configured"); await db.update(gitPullRequests).set(data).where(eq(gitPullRequests.id, id)); }
-
-

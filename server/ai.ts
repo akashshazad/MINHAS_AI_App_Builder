@@ -115,6 +115,15 @@ export function detectSourceLanguage(idea: string): SourceLanguage {
   return "english";
 }
 
+export type PlanningAttachment = { name: string; mimeType: string; url: string; textContent?: string };
+
+export function splitPromptIntoChunks(value: string, chunkSize = 16_000): string[] {
+  if (!value) return [""];
+  const chunks: string[] = [];
+  for (let offset = 0; offset < value.length; offset += chunkSize) chunks.push(value.slice(offset, offset + chunkSize));
+  return chunks;
+}
+
 const planFormat = structuredResponse({
   type: "json_schema",
   json_schema: {
@@ -147,11 +156,15 @@ function normalizePlan(raw: z.infer<typeof projectPlanResponseSchema>["project"]
   return { ...raw, type: type === "mobile_app" ? "mobile_app" : "mobile_app", summary: raw.summary || idea };
 }
 
-export async function generatePlan(idea: string, type: ProjectType): Promise<ProjectPlan> {
+export async function generatePlan(idea: string, type: ProjectType, attachments: PlanningAttachment[] = []): Promise<ProjectPlan> {
   const model = await pickModel("gpt-5-mini");
+  const attachmentText = attachments.filter((attachment) => attachment.textContent).map((attachment) => `\n\n[Attachment: ${attachment.name}]\n${attachment.textContent}`).join("");
+  const promptBody = `Target project type: mobile_app\nFramework: Expo + React Native + TypeScript\nUser idea (preserve every requirement):\n${idea}${attachmentText}`;
+  const promptChunks = splitPromptIntoChunks(promptBody);
+  const userContent: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string; detail: "auto" } }> = [...promptChunks.map((text, index) => ({ type: "text" as const, text: `[Prompt chunk ${index + 1}/${promptChunks.length}]\n${text}` })), ...attachments.filter((attachment) => attachment.mimeType.startsWith("image/")).map((attachment) => ({ type: "image_url" as const, image_url: { url: attachment.url, detail: "auto" as const } }))];
   const baseMessages = [
     { role: "system" as const, content: "You are the MINHAS AI mobile-app planning agent. Convert the user's natural-language request in Urdu, Roman Urdu, English, or mixed language into the exact versioned structured project plan. Never output markdown, code fences, unknown fields, or claims that are not supported. Include concrete requirements for every requested feature." },
-    { role: "user" as const, content: `Target project type: mobile_app\nFramework: Expo + React Native + TypeScript\nUser idea:\n${idea}` },
+    { role: "user" as const, content: userContent },
   ];
   const result = await invokeWithRecovery({
     schema: projectPlanResponseSchema,

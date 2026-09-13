@@ -1,6 +1,6 @@
 
 import { describe, expect, it } from "vitest";
-import { detectSourceLanguage, extractJsonCandidate, parseStructured, projectPlanResponseSchema } from "./ai";
+import { detectSourceLanguage, extractJsonCandidate, parseStructured, projectPlanResponseSchema, splitPromptIntoChunks } from "./ai";
 
 describe("MINHAS AI requirement intake", () => {
   it("detects Urdu script", () => {
@@ -28,5 +28,11 @@ describe("MINHAS AI requirement intake", () => {
   it("accepts mixed Urdu and English as Urdu input", () => {
     expect(detectSourceLanguage("ایک POS app بناؤ with Inventory")).toBe("urdu");
   });
-});
 
+  it("chunks very large prompts without truncating or reordering content", () => {
+    const prompt = "0123456789".repeat(5000);
+    const chunks = splitPromptIntoChunks(prompt, 137);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.join("")).toBe(prompt);
+  });
+});

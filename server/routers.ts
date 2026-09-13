@@ -23,6 +23,8 @@ import { threeWayMerge } from "./git/merge";
 import { advanceAutonomousRun, indexProjectGraph, startAutonomousRun } from "./orchestrator";
 import { evaluateProductionGate } from "./production-gate";
 import type { ProjectPlan, ProjectType } from "../shared/types";
+import { storagePut, storageGetSignedUrl } from "./storage";
+import { transcribeAudio } from "./_core/voiceTranscription";
 
 const projectTypeSchema = z.literal("mobile_app");
 const planFromProject = (value: string): ProjectPlan => { try { return JSON.parse(value) as ProjectPlan; } catch { throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Project plan data is corrupted." }); } };
@@ -39,6 +41,30 @@ async function snapshotProject(projectId: number, label: string, reason: string,
 
 export const appRouter = router({
   templates: router({ list: publicProcedure.query(() => MOBILE_TEMPLATES) }),
+  media: router({
+    upload: protectedProcedure.input(z.object({
+      fileName: z.string().trim().min(1).max(240).regex(/^[A-Za-z0-9._ -]+$/),
+      mimeType: z.string().trim().min(1).max(120),
+      base64: z.string().min(1).max(16_000_000),
+    })).mutation(async ({ ctx, input }) => {
+      const allowed = new Set(["image/png", "image/jpeg", "image/webp", "application/pdf", "text/plain", "text/markdown", "application/json", "text/javascript", "application/javascript", "text/typescript", "text/css", "application/sql", "text/xml", "application/xml", "text/yaml", "application/zip", "audio/m4a", "audio/mp4", "audio/mpeg", "audio/wav", "audio/webm"]);
+      if (!allowed.has(input.mimeType)) throw new TRPCError({ code: "BAD_REQUEST", message: "Unsupported attachment type." });
+      const bytes = Buffer.from(input.base64, "base64");
+      if (!bytes.length || bytes.length > 12 * 1024 * 1024) throw new TRPCError({ code: "BAD_REQUEST", message: "Attachment exceeds the 12 MB safe upload limit." });
+      const uploaded = await storagePut(`users/${ctx.user.id}/attachments/${input.fileName}`, bytes, input.mimeType);
+      const signedUrl = await storageGetSignedUrl(uploaded.key);
+      return { key: uploaded.key, url: signedUrl, fileName: input.fileName, mimeType: input.mimeType, byteSize: bytes.length };
+    }),
+    transcribe: protectedProcedure.input(z.object({ audioBase64: z.string().min(1).max(16_000_000), mimeType: z.string().min(1).max(80), language: z.string().max(16).optional() })).mutation(async ({ input }) => {
+      const bytes = Buffer.from(input.audioBase64, "base64");
+      if (!bytes.length || bytes.length > 12 * 1024 * 1024) throw new TRPCError({ code: "BAD_REQUEST", message: "Recording exceeds the safe upload limit." });
+      const uploaded = await storagePut(`voice/${Date.now()}.audio`, bytes, input.mimeType);
+      const signedUrl = await storageGetSignedUrl(uploaded.key);
+      const result = await transcribeAudio({ audioUrl: signedUrl, language: input.language });
+      if ("error" in result) throw new TRPCError({ code: "PRECONDITION_FAILED", message: result.error });
+      return { text: result.text, language: result.language, duration: result.duration };
+    }),
+  }),
   system: systemRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
@@ -51,12 +77,18 @@ export const appRouter = router({
   projects: router({
     list: protectedProcedure.query(({ ctx }) => db.listUserProjects(ctx.user.id)),
     createPlan: protectedProcedure
-      .input(z.object({ idea: z.string().min(8).max(12000), type: projectTypeSchema.default("mobile_app") }))
+      .input(z.object({ idea: z.string().min(8).max(1_000_000, "Prompt exceeds the 1 MB safe storage limit. Your full prompt was not submitted."), type: projectTypeSchema.default("mobile_app"), idempotencyKey: z.string().regex(/^[A-Za-z0-9_-]{16,100}$/), attachments: z.array(z.object({ name: z.string().min(1).max(240), mimeType: z.string().min(1).max(120), url: z.string().url(), textContent: z.string().max(1_000_000).optional() })).max(20).default([]) }))
       .mutation(async ({ ctx, input }) => {
         const sourceLanguage = detectSourceLanguage(input.idea);
-        const plan = await generatePlan(input.idea, input.type as ProjectType);
-        const projectId = await db.createProject({ userId: ctx.user.id, name: plan.projectName, idea: input.idea, sourceLanguage, projectType: input.type, framework: plan.framework, status: "plan_ready", buildStatus: "not_checked", planJson: JSON.stringify(plan), deployStatus: "planned" });
-        await db.appendProjectEvent({ projectId, type: "plan_created", message: "AI created a structured project plan for review.", metadataJson: JSON.stringify({ sourceLanguage }) });
+        const plan = await generatePlan(input.idea, input.type as ProjectType, input.attachments);
+        let projectId: number;
+        try {
+          projectId = await db.createProjectWithEvent({ userId: ctx.user.id, name: plan.projectName, idea: input.idea, sourceLanguage, projectType: input.type, framework: plan.framework, status: "plan_ready", buildStatus: "not_checked", planJson: JSON.stringify(plan), deployStatus: "planned" }, { type: "plan_created", message: "AI created a structured project plan for review.", metadataJson: JSON.stringify({ sourceLanguage, idempotencyKey: input.idempotencyKey }) });
+        } catch (error) {
+          const requestId = String(ctx.res.locals.requestId ?? "unknown");
+          console.error("[projects.createPlan] transaction failed", { requestId, error: error instanceof Error ? error.message : "unknown" });
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Project creation failed. Your prompt has been preserved. Retry when ready. Request ID: ${requestId}` });
+        }
         return { projectId, project: { id: projectId, name: plan.projectName, sourceLanguage }, plan };
       }),
     get: protectedProcedure
@@ -215,7 +247,7 @@ export const appRouter = router({
         }
       }),
     softwareFactory: protectedProcedure
-      .input(z.object({ projectId: z.number().int().positive(), instruction: z.string().min(4).max(12000) }))
+      .input(z.object({ projectId: z.number().int().positive(), instruction: z.string().min(4).max(1_000_000, "Instruction exceeds the 1 MB safe storage limit.") }))
       .mutation(async ({ ctx, input }) => {
         const project = await ownedProject(ctx.user.id, input.projectId);
         const files = await db.listProjectFiles(project.id);
@@ -231,7 +263,7 @@ export const appRouter = router({
         return { reports, runIds, completedAt: new Date().toISOString() };
       }),
     agentTask: protectedProcedure
-      .input(z.object({ projectId: z.number().int().positive(), instruction: z.string().min(4).max(12000), mode: z.enum(["preview", "apply"]).default("preview"), runId: z.number().int().positive().optional() }))
+      .input(z.object({ projectId: z.number().int().positive(), instruction: z.string().min(4).max(1_000_000, "Instruction exceeds the 1 MB safe storage limit."), mode: z.enum(["preview", "apply"]).default("preview"), runId: z.number().int().positive().optional() }))
       .mutation(async ({ ctx, input }) => {
         const project = await ownedProject(ctx.user.id, input.projectId);
         const files = await db.listProjectFiles(project.id);
@@ -541,5 +573,3 @@ export const appRouter = router({
   }),
 });
 export type AppRouter = typeof appRouter;
-
-
