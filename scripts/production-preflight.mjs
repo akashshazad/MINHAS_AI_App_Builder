@@ -1,4 +1,3 @@
-
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
@@ -48,5 +47,4 @@ const pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
 if (pkg.packageManager !== 'pnpm@9.12.0') errors.push(`packageManager must remain pnpm@9.12.0 (found ${pkg.packageManager}).`);
 if (errors.length) { console.error('PRODUCTION PREFLIGHT FAIL'); for (const e of errors) console.error(`- ${e}`); process.exit(1); }
 console.log('PRODUCTION PREFLIGHT PASS: release structure, production env contract, package-manager pin, and secret scan are valid.');
-
 

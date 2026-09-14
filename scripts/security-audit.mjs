@@ -1,8 +1,6 @@
-
 #!/usr/bin/env node
 import fs from 'node:fs'; import path from 'node:path';
 const root=process.cwd(), findings=[]; const skip=new Set(['node_modules','.git','dist','.expo']); const exts=/\.(ts|tsx|js|mjs|json|yml|yaml)$/;
 function walk(dir){for(const e of fs.readdirSync(dir,{withFileTypes:true})){if(skip.has(e.name))continue;const p=path.join(dir,e.name);if(e.isDirectory())walk(p);else if(exts.test(e.name) && !e.name.endsWith('.test.ts') && p !== path.join(root,'scripts/security-audit.mjs') && p !== path.join(root,'server/native-build-service/security-audit.ts')){let s;try{s=fs.readFileSync(p,'utf8')}catch{continue}for(const [i,l] of s.split(/\r?\n/).entries()){if(/\b(?:password|secret|token|api[_-]?key)\s*[:=]\s*["'][^"']{8,}["']/i.test(l)&&!/process\.env\./.test(l)&&!/(example|placeholder|sample)/i.test(l))findings.push({severity:'high',file:path.relative(root,p),line:i+1,rule:'hardcoded-secret'});if(/docker.*--privileged|docker.*--pid=host|--net=host/.test(l))findings.push({severity:'critical',file:path.relative(root,p),line:i+1,rule:'dangerous-docker-flag'})}}}}
 walk(root); console.log(JSON.stringify({status:findings.some(f=>f.severity==='critical'||f.severity==='high')?'BLOCKED':'PASS',findings},null,2)); process.exit(findings.some(f=>f.severity==='critical'||f.severity==='high')?1:0);
-
 

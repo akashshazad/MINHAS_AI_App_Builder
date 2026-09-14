@@ -1,4 +1,3 @@
-
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
@@ -47,5 +46,4 @@ console.log('RELEASE CERTIFICATION PASS');
 console.log(`Checks passed: ${checks.length}`);
 for(const w of warnings) console.log(`WARNING: ${w}`);
 if(!artifact) console.log('Live APK/AAB certification remains infrastructure-dependent; no artifact path was supplied.');
-
 
